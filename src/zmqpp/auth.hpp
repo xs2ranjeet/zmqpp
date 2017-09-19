@@ -21,7 +21,7 @@
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
-
+#include <functional>
 #include "actor.hpp"
 #include "poller.hpp"
 #include "socket.hpp"
@@ -45,6 +45,8 @@ namespace zmqpp
  */
 class auth 
 {
+		typedef std::function<bool(const std::string&)> validate_client_handler_t;
+
 public:
 	/**
 	 * Constructor. A auth actor takes over authentication for all incoming connections in
@@ -54,6 +56,7 @@ public:
 	 */
 	auth(context& ctx);
 
+	auth(context& ctx, const validate_client_handler_t& callback);
 	/**
 	 * Destructor.
 	 *
@@ -156,7 +159,9 @@ private:
     	bool                        curve_allow_any;      // CURVE allows arbitrary clients
     	bool 					 	terminated;     // Did caller ask us to quit?
     	bool 					 	verbose;        // Verbose logging enabled?
-
+		
+		//! user defined before callback handler
+		validate_client_handler_t validate_callback = nullptr;
 #	if defined(ZMQPP_NO_CONSTEXPR)
         static const char * const zap_endpoint_;
 #	else

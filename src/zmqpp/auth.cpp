@@ -32,7 +32,7 @@
 
 namespace zmqpp
 {
-auth::auth(context& ctx) :
+auth::auth(context& ctx ) :
   curve_allow_any(false),
   terminated(false),
   verbose(false)
@@ -65,7 +65,49 @@ auth::auth(context& ctx) :
         zap_handler.unbind(zap_endpoint_);
         return true;        
     };
+   // Start ZAP Authentication Server
+    std::cout << "auth: Starting ZAP Authentication Server" << std::endl; 
+    authenticator = std::make_shared<actor>(std::bind(zap_auth_server, std::placeholders::_1, std::ref(ctx)));
+}
 
+
+auth::auth(context& ctx, const validate_client_handler_t& callback  ) :
+  curve_allow_any(false),
+  terminated(false),
+  verbose(false)
+  {
+    auto zap_auth_server = [this] (socket * pipe, context& auth_ctx) -> bool {
+        // spawn ZAP handler
+        socket zap_handler(auth_ctx, socket_type::reply);
+        try {
+            zap_handler.bind(zap_endpoint_);
+            pipe->send(signal::ok);
+        }
+        catch (zmq_internal_exception const&) {
+            // by returning false here, the actor will send signal::ko
+            // this will make the actor constructor throw.
+            // we could also to the ourselves: pipe->send(signal::ko);)
+            return false;
+        }
+
+
+        auth_poller.add(*pipe);
+        auth_poller.add(zap_handler);
+
+        while (!terminated && auth_poller.poll()) {
+            if (auth_poller.has_input(zap_handler)) {
+                authenticate(zap_handler);
+            }
+            if (auth_poller.has_input(*pipe)) {
+                handle_command(*pipe);
+            }
+        }
+        zap_handler.unbind(zap_endpoint_);
+        return true;        
+    };
+
+        if(callback != nullptr)
+            validate_callback = callback;
     // Start ZAP Authentication Server
     std::cout << "auth: Starting ZAP Authentication Server" << std::endl; 
     authenticator = std::make_shared<actor>(std::bind(zap_auth_server, std::placeholders::_1, std::ref(ctx)));
@@ -278,7 +320,16 @@ bool auth::authenticate_curve(zap_request& request, std::string &user_id)
         }
         user_id = request.get_client_key();
     	return true;
-	} else {
+	} else if(validate_callback != nullptr){
+        bool response = validate_callback(request.get_client_key());
+        if(response)
+            std::cout << "auth: allowed (CURVE) client_key=" << request.get_client_key() << std::endl;
+        else
+            std::cout << "auth: denied (CURVE) client_key=" << request.get_client_key() << std::endl;
+        return response;
+
+
+    } else {
 		auto search = client_keys.find(request.get_client_key());
     	if(search != client_keys.end()) {
     		if (verbose) {
